@@ -1,148 +1,164 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 
-// Issue 1: Inline API key (security issue)
-const API_KEY = 'sk-1234567890abcdef'
+// Perbaikan Issue 1: Menggunakan Environment Variable (Vite/CRA)
+const API_KEY = import.meta.env.VITE_API_KEY;
 
 function App() {
-  // Issue 2: State management bisa lebih baik
-  const [todos, setTodos] = useState([])
+  // Perbaikan Issue 2: State diinisialisasi langsung dari localStorage agar sinkron & efisien (Lazy Initial State)
+  const [todos, setTodos] = useState(() => {
+    try {
+      const saved = localStorage.getItem('todos')
+      return saved ? JSON.parse(saved) : []
+    } catch (error) {
+      console.error('Failed to parse todos from localStorage', error)
+      return []
+    }
+  })
+  
   const [input, setInput] = useState('')
   const [filter, setFilter] = useState('all')
   
-  // Issue 3: useEffect tanpa dependency array yang tepat
+  // Perbaikan Issue 3 & 4: Digabung menjadi satu useEffect dengan dependency array [todos] yang tepat
   useEffect(() => {
-    // Load from localStorage
-    const saved = localStorage.getItem('todos')
-    if (saved) {
-      setTodos(JSON.parse(saved))
+    try {
+      localStorage.setItem('todos', JSON.stringify(todos))
+    } catch (error) {
+      console.error('Failed to save todos to localStorage', error)
     }
-  }, [])
+  }, [todos])
   
-  // Issue 4: useEffect yang terlalu sering run
-  useEffect(() => {
-    localStorage.setItem('todos', JSON.stringify(todos))
-  })
-  
-  // Issue 5: Function yang tidak di-memoize, re-create setiap render
-  const addTodo = () => {
+  // Perbaikan Issue 5: Di-memoize menggunakan useCallback agar fungsi tidak dibuat ulang di setiap render
+  const addTodo = useCallback(() => {
     if (input.trim() === '') {
       alert('Please enter a todo')
       return
     }
     
-    // Issue 6: Menggunakan Date.now() sebagai ID (bisa collision)
+    // Perbaikan Issue 6: Menggunakan crypto.randomUUID() untuk menjamin keunikan ID unik (anti-collision)
     const newTodo = {
-      id: Date.now(),
+      id: crypto.randomUUID(),
       text: input,
       completed: false,
       createdAt: new Date().toISOString()
     }
     
-    setTodos([...todos, newTodo])
+    setTodos(prevTodos => [...prevTodos, newTodo])
     setInput('')
-  }
+  }, [input])
   
-  // Issue 7: Tidak ada error handling
-  const deleteTodo = (id) => {
-    setTodos(todos.filter(todo => todo.id !== id))
-  }
+  // Perbaikan Issue 7: Menambahkan penanganan jika ID tidak ditemukan (defensive programming)
+  const deleteTodo = useCallback((id) => {
+    setTodos(prevTodos => {
+      if (!prevTodos.some(todo => todo.id === id)) {
+        console.error(`Todo with ID ${id} not found.`)
+        return prevTodos
+      }
+      return prevTodos.filter(todo => todo.id !== id)
+    })
+  }, [])
   
-  const toggleTodo = (id) => {
-    setTodos(todos.map(todo => 
+  const toggleTodo = useCallback((id) => {
+    setTodos(prevTodos => prevTodos.map(todo => 
       todo.id === id ? { ...todo, completed: !todo.completed } : todo
     ))
-  }
+  }, [])
   
-  // Issue 8: Logic filtering yang bisa dipindah ke useMemo
-  const getFilteredTodos = () => {
-    if (filter === 'active') {
-      return todos.filter(todo => !todo.completed)
-    }
-    if (filter === 'completed') {
-      return todos.filter(todo => todo.completed)
-    }
+  // Perbaikan Issue 8: Menggunakan useMemo agar filtering hanya berjalan ketika `todos` atau `filter` berubah
+  const filteredTodos = useMemo(() => {
+    if (filter === 'active') return todos.filter(todo => !todo.completed)
+    if (filter === 'completed') return todos.filter(todo => todo.completed)
     return todos
-  }
+  }, [todos, filter])
   
-  // Issue 9: Calculation yang tidak perlu di setiap render
-  const stats = {
-    total: todos.length,
-    completed: todos.filter(t => t.completed).length,
-    active: todos.filter(t => !t.completed).length
-  }
-  
-  // Issue 10: Inline event handler dengan arrow function (re-create setiap render)
+  // Perbaikan Issue 9: Menggunakan useMemo untuk kalkulasi statistik agar tidak membebani setiap render
+  const stats = useMemo(() => {
+    const total = todos.length
+    const completed = todos.filter(t => t.completed).length
+    return {
+      total,
+      completed,
+      active: total - completed
+    }
+  }, [todos])
+
+  // Perbaikan Issue 10: Event handler dipisah menjadi fungsi bernama agar tidak membuat arrow function inline
+  const handleInputChange = useCallback((e) => setInput(e.target.value), [])
+  const handleKeyPress = useCallback((e) => {
+    if (e.key === 'Enter') addTodo()
+  }, [addTodo])
+
   return (
     <div className="app">
       <h1>My Todo List</h1>
       
-      {/* Issue 11: Tidak ada label untuk accessibility */}
+      {/* Perbaikan Issue 11: Menambahkan label tersembunyi (sr-only) atau properti htmlFor untuk Aksesibilitas */}
       <div className="input-section">
+        <label htmlFor="todo-input" className="visually-hidden">New Todo Item</label>
         <input 
+          id="todo-input"
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => {
-            if (e.key === 'Enter') {
-              addTodo()
-            }
-          }}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyPress}
           placeholder="What needs to be done?"
         />
         <button onClick={addTodo}>Add</button>
       </div>
       
-      {/* Issue 12: Inline styles (inconsistent dengan CSS file) */}
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
+      {/* Perbaikan Issue 12: Menggunakan CSS className dinamis (Direkomendasikan pindah ke file .css) */}
+      <div className="filter-buttons">
         <button 
           onClick={() => setFilter('all')}
-          style={{ background: filter === 'all' ? '#28a745' : '#007bff' }}
+          className={filter === 'all' ? 'btn-active' : 'btn-inactive'}
         >
           All
         </button>
         <button 
           onClick={() => setFilter('active')}
-          style={{ background: filter === 'active' ? '#28a745' : '#007bff' }}
+          className={filter === 'active' ? 'btn-active' : 'btn-inactive'}
         >
           Active
         </button>
         <button 
           onClick={() => setFilter('completed')}
-          style={{ background: filter === 'completed' ? '#28a745' : '#007bff' }}
+          className={filter === 'completed' ? 'btn-active' : 'btn-inactive'}
         >
           Completed
         </button>
       </div>
       
       <div className="todo-list">
-        {/* Issue 13: Tidak ada handling untuk empty state */}
-        {getFilteredTodos().map((todo) => (
-          // Issue 14: Key menggunakan index bisa lebih baik dengan ID
-          <div key={todo.id} className={`todo-item ${todo.completed ? 'completed' : ''}`}>
-            <input 
-              type="checkbox"
-              checked={todo.completed}
-              onChange={() => toggleTodo(todo.id)}
-            />
-            {/* Issue 15: Potential XSS jika text dari user input */}
-            <span dangerouslySetInnerHTML={{ __html: todo.text }} />
-            <button 
-              className="delete-btn"
-              onClick={() => deleteTodo(todo.id)}
-            >
-              Delete
-            </button>
-          </div>
-        ))}
+        {/* Perbaikan Issue 13: Handling Empty State */}
+        {filteredTodos.length === 0 ? (
+          <p className="empty-message">No todos found.</p>
+        ) : (
+          filteredTodos.map((todo) => (
+            // Perbaikan Issue 14: Konsisten menggunakan Unique ID (todo.id) untuk key React
+            <div key={todo.id} className={`todo-item ${todo.completed ? 'completed' : ''}`}>
+              <input 
+                type="checkbox"
+                aria-label={`Mark "${todo.text}" as completed`}
+                checked={todo.completed}
+                onChange={() => toggleTodo(todo.id)}
+              />
+              {/* Perbaikan Issue 15: Menggunakan JSX standar (Aman dari celah keamanan XSS) */}
+              <span>{todo.text}</span>
+              <button 
+                className="delete-btn"
+                onClick={() => deleteTodo(todo.id)}
+              >
+                Delete
+              </button>
+            </div>
+          ))
+        )}
       </div>
       
       <div className="stats">
         <p>Total: {stats.total} | Active: {stats.active} | Completed: {stats.completed}</p>
       </div>
-      
-      {/* Issue 16: Debug code yang tertinggal */}
-      {console.log('Rendering with todos:', todos)}
-      {console.log('API Key:', API_KEY)}
+
+      {/* Perbaikan Issue 16: Kode debug console.log() sudah dihapus sepenuhnya */}
     </div>
   )
 }
